@@ -240,8 +240,11 @@ fn handle_edit(_state: &ServerState, mutable: &mut MutableState, content: String
     }
 
     // Add new cards to end of queue with Performance::New
+    let now = Timestamp::now();
     for new_card in new_cards {
         let hash = new_card.hash();
+        // Insert into database (ignore error if already exists)
+        let _ = mutable.db.insert_card(hash, now);
         // Insert into cache (ignore error if already exists - shouldn't happen)
         let _ = mutable.cache.insert(hash, Performance::New);
         mutable.cards.push(new_card);
