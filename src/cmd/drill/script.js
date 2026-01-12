@@ -39,10 +39,55 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 });
 
+// Toggle the edit form visibility
+function toggleEdit() {
+  const editForm = document.getElementById("edit-form");
+  if (editForm) {
+    if (editForm.hidden) {
+      editForm.hidden = false;
+      const textarea = document.getElementById("edit-textarea");
+      if (textarea) {
+        textarea.focus();
+      }
+    } else {
+      editForm.hidden = true;
+    }
+  }
+}
+
 document.addEventListener("keydown", function (event) {
   // Skip during text input.
   if (event.target.tagName === "INPUT" && event.target.type === "text") {
     return;
+  }
+
+  // Skip during textarea input (except for Escape)
+  if (event.target.tagName === "TEXTAREA" && event.key !== "Escape") {
+    return;
+  }
+
+  // Handle Escape key to close edit form
+  if (event.key === "Escape") {
+    const editForm = document.getElementById("edit-form");
+    if (editForm && !editForm.hidden) {
+      event.preventDefault();
+      toggleEdit();
+      return;
+    }
+  }
+
+  // Handle 'e' key to open edit form
+  if (event.key === "e") {
+    // Ignore modifiers.
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+      return;
+    }
+    const editToggle = document.getElementById("edit-toggle");
+    if (editToggle) {
+      event.preventDefault();
+      toggleEdit();
+      return;
+    }
   }
 
   const keybindings = {

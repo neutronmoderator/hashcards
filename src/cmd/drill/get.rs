@@ -65,6 +65,9 @@ fn render_session_page(state: &ServerState, mutable: &MutableState) -> Fallible<
     let card = mutable.cards[0].clone();
     let coll_path = state.directory.clone();
     let deck_path = card.relative_file_path(&coll_path)?;
+    let source_text = card.content().to_source_text();
+    let source_file = deck_path.display().to_string();
+    let source_range = card.range();
     let config = MarkdownRenderConfig {
         resolver: MediaResolverBuilder::new()
             .with_collection_path(coll_path)?
@@ -89,6 +92,7 @@ fn render_session_page(state: &ServerState, mutable: &MutableState) -> Fallible<
         html! {
             form action="/" method="post" {
                 (undo_button(undo_disabled))
+                input #edit-toggle type="button" value="Edit" title="Edit this card. Shortcut: e." onclick="toggleEdit()";
                 div.spacer {}
                 div.grades {
                     (grades)
@@ -105,6 +109,25 @@ fn render_session_page(state: &ServerState, mutable: &MutableState) -> Fallible<
                 input id="reveal" type="submit" name="action" value="Reveal" title="Show the answer. Shortcut: space.";
                 div.spacer {}
                 (end_button())
+            }
+        }
+    };
+    let edit_form = html! {
+        div #edit-form hidden {
+            div.edit-source {
+                "Source: " (source_file) " (lines " (source_range.0 + 1) "-" (source_range.1 + 1) ")"
+            }
+            form action="/" method="post" {
+                textarea #edit-textarea name="edit_content" rows="8" {
+                    (source_text)
+                }
+                div.edit-warning {
+                    "Warning: Editing creates a new card. Learning progress will reset."
+                }
+                div.edit-buttons {
+                    input type="button" value="Cancel" onclick="toggleEdit()";
+                    input type="submit" name="action" value="Edit";
+                }
             }
         }
     };
@@ -128,6 +151,7 @@ fn render_session_page(state: &ServerState, mutable: &MutableState) -> Fallible<
             div.controls {
                 (card_controls)
             }
+            (edit_form)
         }
     };
     Ok(html)

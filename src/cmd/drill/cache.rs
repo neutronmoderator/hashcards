@@ -69,6 +69,11 @@ impl Cache {
         }
     }
 
+    /// Remove a card from the cache. Does nothing if the card is not present.
+    pub fn remove(&mut self, card_hash: CardHash) {
+        self.changes.remove(&card_hash);
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&CardHash, &Performance)> {
         self.changes.iter()
     }

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs;
+use std::path::Path;
+
 use axum::Form;
 use axum::extract::State;
 use axum::response::Redirect;
@@ -22,8 +25,11 @@ use crate::cmd::drill::state::Review;
 use crate::cmd::drill::state::ServerState;
 use crate::db::ReviewRecord;
 use crate::error::Fallible;
+use crate::error::fail;
 use crate::fsrs::Grade;
+use crate::parser::Parser;
 use crate::types::card::Card;
+use crate::types::card::CardType;
 use crate::types::card_hash::CardHash;
 use crate::types::performance::Performance;
 use crate::types::performance::ReviewedPerformance;
@@ -40,6 +46,7 @@ enum Action {
     Good,
     Easy,
     Shutdown,
+    Edit,
 }
 
 impl Action {
@@ -57,13 +64,14 @@ impl Action {
 #[derive(Deserialize)]
 pub struct FormData {
     action: Action,
+    edit_content: Option<String>,
 }
 
 pub async fn post_handler(
     State(state): State<ServerState>,
     Form(form): Form<FormData>,
 ) -> Redirect {
-    match action_handler(state, form.action).await {
+    match action_handler(state, form.action, form.edit_content).await {
         Ok(_) => {}
         Err(e) => {
             log::error!("error: {e}");
@@ -72,7 +80,11 @@ pub async fn post_handler(
     Redirect::to("/")
 }
 
-async fn action_handler(state: ServerState, action: Action) -> Fallible<()> {
+async fn action_handler(
+    state: ServerState,
+    action: Action,
+    edit_content: Option<String>,
+) -> Fallible<()> {
     let mut mutable = state.mutable.lock().unwrap();
     match action {
         Action::Reveal => {
@@ -150,6 +162,11 @@ async fn action_handler(state: ServerState, action: Action) -> Fallible<()> {
                 }
             }
         }
+        Action::Edit => {
+            if let Some(content) = edit_content {
+                handle_edit(&state, &mut mutable, content)?;
+            }
+        }
     }
     Ok(())
 }
@@ -168,6 +185,115 @@ fn finish_session(mutable: &mut MutableState, state: &ServerState) -> Fallible<(
             .db
             .update_card_performance(*card_hash, *performance)?;
     }
+    Ok(())
+}
+
+fn handle_edit(_state: &ServerState, mutable: &mut MutableState, content: String) -> Fallible<()> {
+    let content = content.trim();
+    if content.is_empty() {
+        return fail("Edit content cannot be empty.");
+    }
+
+    // Get the current card (don't remove yet - we need it for metadata)
+    let card = mutable.cards[0].clone();
+    let file_path = card.file_path().clone();
+    let range = card.range();
+    let deck_name = card.deck_name().clone();
+
+    // Validate by parsing the new content
+    let parser = Parser::new(deck_name.clone(), file_path.clone());
+    let new_cards = parser.parse(content).map_err(|e| {
+        crate::error::ErrorReport::new(format!("Invalid card syntax: {}", e))
+    })?;
+
+    if new_cards.is_empty() {
+        return fail("Edit resulted in no valid cards.");
+    }
+
+    // Write changes to file
+    write_card_edit(&file_path, range, content)?;
+
+    // Remove current card from queue
+    mutable.cards.remove(0);
+    let old_hash = card.hash();
+    mutable.cache.remove(old_hash);
+
+    // For cloze cards: remove all sibling cards (same family_hash) from queue
+    if card.card_type() == CardType::Cloze {
+        if let Some(family_hash) = card.family_hash() {
+            // Collect hashes of siblings to remove from cache
+            let sibling_hashes: Vec<CardHash> = mutable
+                .cards
+                .iter()
+                .filter(|c| c.family_hash() == Some(family_hash))
+                .map(|c| c.hash())
+                .collect();
+
+            // Remove siblings from queue
+            mutable.cards.retain(|c| c.family_hash() != Some(family_hash));
+
+            // Remove siblings from cache
+            for hash in sibling_hashes {
+                mutable.cache.remove(hash);
+            }
+        }
+    }
+
+    // Add new cards to end of queue with Performance::New
+    for new_card in new_cards {
+        let hash = new_card.hash();
+        // Insert into cache (ignore error if already exists - shouldn't happen)
+        let _ = mutable.cache.insert(hash, Performance::New);
+        mutable.cards.push(new_card);
+    }
+
+    // Clear undo history (edits break the undo chain)
+    mutable.reviews.clear();
+
+    // Reset reveal state
+    mutable.reveal = false;
+
+    log::info!("Card edited. File: {}", file_path.display());
+    Ok(())
+}
+
+fn write_card_edit(file_path: &Path, range: (usize, usize), new_text: &str) -> Fallible<()> {
+    let content = fs::read_to_string(file_path)?;
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Verify line range is valid
+    if range.1 >= lines.len() {
+        return fail(format!(
+            "Line range ({}-{}) is out of bounds for file with {} lines.",
+            range.0 + 1,
+            range.1 + 1,
+            lines.len()
+        ));
+    }
+
+    // Build new content
+    let mut new_lines: Vec<&str> = Vec::new();
+
+    // Lines before the card
+    new_lines.extend_from_slice(&lines[..range.0]);
+
+    // The edited card content (may be multiline)
+    let edit_lines: Vec<&str> = new_text.lines().collect();
+    new_lines.extend(edit_lines);
+
+    // Lines after the card (skip old card lines)
+    if range.1 + 1 < lines.len() {
+        new_lines.extend_from_slice(&lines[range.1 + 1..]);
+    }
+
+    let mut new_content = new_lines.join("\n");
+
+    // Preserve trailing newline if original had one
+    if content.ends_with('\n') && !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+
+    fs::write(file_path, new_content)?;
     Ok(())
 }
 

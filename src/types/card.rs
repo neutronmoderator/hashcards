@@ -170,6 +170,28 @@ impl CardContent {
         hasher.finalize()
     }
 
+    /// Reconstruct the original markdown source text for this card.
+    ///
+    /// For basic cards: `Q: {question}\nA: {answer}`
+    /// For cloze cards: `C: {text_with_brackets}`
+    pub fn to_source_text(&self) -> String {
+        match self {
+            CardContent::Basic { question, answer } => {
+                format!("Q: {}\nA: {}", question, answer)
+            }
+            CardContent::Cloze { text, start, end } => {
+                let mut bytes = text.as_bytes().to_vec();
+                // Insert ] after the last character of the deletion (higher position first)
+                bytes.insert(*end + 1, b']');
+                // Insert [ before the first character of the deletion
+                bytes.insert(*start, b'[');
+                let with_brackets =
+                    String::from_utf8(bytes).unwrap_or_else(|_| text.clone());
+                format!("C: {}", with_brackets)
+            }
+        }
+    }
+
     /// All cloze cards derived from the same text have the same family hash.
     ///
     /// For basic cards, this is `None`.
@@ -252,7 +274,8 @@ mod tests {
     fn test_cloze_card_hash() {
         let a = CardContent::new_cloze("The capital of France is Paris", 0, 1);
         let b = CardContent::new_cloze("The capital of France is Paris", 0, 2);
-        assert_eq!(a.family_hash(), b.family_hash());
+        // Different positions produce different card hashes
+        assert_ne!(a.hash(), b.hash());
     }
 
     #[test]
@@ -260,5 +283,18 @@ mod tests {
         let a = CardContent::new_cloze("The capital of France is Paris", 0, 1);
         let b = CardContent::new_cloze("The capital of France is Paris", 0, 2);
         assert_eq!(a.family_hash(), b.family_hash());
+    }
+
+    #[test]
+    fn test_basic_to_source_text() {
+        let card = CardContent::new_basic("What is 2+2?", "4");
+        assert_eq!(card.to_source_text(), "Q: What is 2+2?\nA: 4");
+    }
+
+    #[test]
+    fn test_cloze_to_source_text() {
+        // "Foo bar baz." with deletion at "bar" (positions 4-6)
+        let card = CardContent::new_cloze("Foo bar baz.", 4, 6);
+        assert_eq!(card.to_source_text(), "C: Foo [bar] baz.");
     }
 }
