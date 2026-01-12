@@ -46,7 +46,7 @@ enum Action {
     Good,
     Easy,
     Shutdown,
-    Edit,
+    Save,
 }
 
 impl Action {
@@ -162,7 +162,7 @@ async fn action_handler(
                 }
             }
         }
-        Action::Edit => {
+        Action::Save => {
             if let Some(content) = edit_content {
                 handle_edit(&state, &mut mutable, content)?;
             }

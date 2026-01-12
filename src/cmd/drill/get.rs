@@ -126,7 +126,7 @@ fn render_session_page(state: &ServerState, mutable: &MutableState) -> Fallible<
                 }
                 div.edit-buttons {
                     input type="button" value="Cancel" onclick="toggleEdit()";
-                    input type="submit" name="action" value="Edit";
+                    input type="submit" name="action" value="Save";
                 }
             }
         }
